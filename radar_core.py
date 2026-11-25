@@ -1,17 +1,3 @@
-"""
-radar_core.py - Nucleo da simulacao do Radar de Ruido (camera acustica).
-
-Pipeline (por quadro de 128 ms):
-  1. Sintetiza o som de cada veiculo (moto adulterada / normal / carro) + ruido de fundo.
-  2. Propaga ate cada microfone do conjunto linear (atraso r/c e atenuacao 1/r).
-  3. Calcula correlacoes cruzadas entre todos os pares de microfones (GCC).
-  4. Beamforming (delay-and-sum) em uma grade da via -> mapa de calor acustico.
-  5. Mede o nivel de cada veiculo detectado pela camera "apontando" o feixe para ele.
-Depois de N quadros: rastreamento + regras de decisao ("na duvida, nao autua").
-
-Simplificacoes (declaradas no relatorio): cena 2D (sem altura), sem Doppler,
-sem reflexoes nas fachadas, niveis medidos na banda 300-3000 Hz (aprox. dB(A)).
-"""
 from __future__ import annotations
 
 import datetime as dt
@@ -22,15 +8,14 @@ import numpy as np
 from numpy.fft import irfft, rfft, rfftfreq
 from scipy.signal import butter, find_peaks, sosfiltfilt
 
-# ------------------------------------------------------------------ constantes
-C_SOM = 343.0          # m/s
-FS = 16_000            # Hz
-N_QUADRO = 2048        # amostras por quadro (128 ms)
-NFFT = 2 * N_QUADRO    # zero-padding -> correlacao linear
-UP = 4                 # sobreamostragem da correlacao (resolucao de atraso)
-P_REF = 20e-6          # Pa
+C_SOM = 343.0
+FS = 16_000
+N_QUADRO = 2048
+NFFT = 2 * N_QUADRO
+UP = 4
+P_REF = 20e-6
 BANDA = (300.0, 3000.0)
-D_REF = 7.5            # m (distancia de referencia, como no ensaio de passagem ISO 362)
+D_REF = 7.5
 
 STATUS_OK = "OK"
 STATUS_REVISAO = "REVISAO_HUMANA"
@@ -39,7 +24,6 @@ STATUS_AUTUA = "AUTUACAO_SUGERIDA"
 _SOS_BANDA = butter(4, BANDA, btype="bandpass", fs=FS, output="sos")
 
 
-# ------------------------------------------------------------------ acustica basica
 def db_para_pa(L):
     return P_REF * 10 ** (np.asarray(L, float) / 20)
 
@@ -49,25 +33,22 @@ def pa_para_db(p):
 
 
 def soma_db(niveis):
-    """Soma energetica de fontes: 90 dB + 90 dB = 93 dB."""
     return 10 * np.log10(np.sum(10 ** (np.asarray(niveis, float) / 10)))
 
 
 def nivel_na_distancia(L_ref, d_ref, d):
-    """Divergencia esferica: -6 dB a cada dobro de distancia."""
     return L_ref - 20 * np.log10(np.asarray(d, float) / d_ref)
 
 
-# ------------------------------------------------------------------ cena
 @dataclass
 class Veiculo:
     nome: str
     placa: str
-    tipo: str            # "moto" | "carro"
-    x0: float            # m, posicao ao longo da via no instante t=0
-    y: float             # m, distancia ate o radar (faixa)
-    v: float             # m/s
-    L75: float           # dB (banda) a 7,5 m - "verdade" da simulacao
+    tipo: str
+    x0: float
+    y: float
+    v: float
+    L75: float
     adulterado: bool = False
     rpm: float = 6000.0
 
@@ -78,8 +59,8 @@ class Veiculo:
 @dataclass
 class ConfigArray:
     n_mics: int = 16
-    espacamento: float = 0.06    # m -> abertura 0,90 m; sem aliasing espacial ate ~2,9 kHz
-    jitter_us: float = 0.0       # erro de sincronizacao entre microfones (desvio-padrao)
+    espacamento: float = 0.06
+    jitter_us: float = 0.0
 
     def posicoes(self):
         x = (np.arange(self.n_mics) - (self.n_mics - 1) / 2) * self.espacamento
@@ -93,20 +74,17 @@ class ConfigArray:
         return (self.n_mics - 1) * self.espacamento
 
     def largura_feixe_deg(self, theta_deg, f=1500.0):
-        """Largura aproximada do lobulo principal (Hamming alarga ~1,3x)."""
         lam = C_SOM / f
         s = max(np.sin(np.radians(theta_deg)), 0.3)
         return float(np.degrees(1.3 * 0.886 * lam / (self.abertura * s)))
 
 
-# ------------------------------------------------------------------ sintese do som
 def sinal_veiculo(veic: Veiculo, n: int, rng: np.random.Generator) -> np.ndarray:
-    """Som sintetico normalizado (RMS = 1 na banda de analise)."""
     t = np.arange(n) / FS
     cil = 1 if veic.tipo == "moto" else 4
-    f0 = veic.rpm / 120 * cil * rng.uniform(0.95, 1.05)       # frequencia de explosao
+    f0 = veic.rpm / 120 * cil * rng.uniform(0.95, 1.05)
     k = np.arange(1, int(5000 / f0) + 1)
-    expo = 0.8 if veic.adulterado else 1.6                    # adulterada: harmonicos fortes
+    expo = 0.8 if veic.adulterado else 1.6
     amp = 1.0 / k ** expo
     fase = rng.uniform(0, 2 * np.pi, k.size)
     harm = (amp[:, None] * np.sin(2 * np.pi * f0 * k[:, None] * t[None, :] + fase[:, None])).sum(0)
@@ -115,12 +93,11 @@ def sinal_veiculo(veic: Veiculo, n: int, rng: np.random.Generator) -> np.ndarray
     ruido = rng.standard_normal(n)
     if veic.adulterado:
         s = 0.7 * harm + 1.0 * ruido
-        # "estouros" de escapamento: rajadas impulsivas
         for p in rng.integers(0, n - 200, rng.poisson(10 * n / FS) + 1):
             m = min(200, n - p)
             s[p:p + m] += 6 * np.exp(-np.arange(m) / (0.002 * FS)) * rng.standard_normal(m)
     else:
-        corte = 1200 if veic.tipo == "moto" else 800           # silenciador abafa os agudos
+        corte = 1200 if veic.tipo == "moto" else 800
         ruido = sosfiltfilt(butter(4, corte, fs=FS, output="sos"), ruido)
         s = 1.0 * harm + 0.5 * ruido / (np.std(ruido) + 1e-12)
     return s / (np.std(sosfiltfilt(_SOS_BANDA, s)) + 1e-12)
@@ -132,17 +109,15 @@ def _sinal_fundo(n, rng):
 
 
 def simular_quadro(veiculos, t, cfg: ConfigArray, rng, fundo_db=60.0, erro_sinc=None):
-    """Sinais dos M microfones (Pa) durante um quadro que comeca no instante t."""
     mics = cfg.posicoes()
     M = len(mics)
-    pad = 1024                                   # > maior atraso (evita "volta" circular)
+    pad = 1024
     ntot = N_QUADRO + pad
     f = rfftfreq(ntot, 1 / FS)
     e = np.zeros(M) if erro_sinc is None else erro_sinc
     X = np.zeros((M, f.size), complex)
 
     fontes = [(v.pos(t), v.L75, sinal_veiculo(v, ntot, rng)) for v in veiculos]
-    # transito distante: 3 fontes a 40-80 m que somam ~fundo_db no radar
     for _ in range(3):
         ang, dist = rng.uniform(0.2, np.pi - 0.2), rng.uniform(40, 80)
         L_arr = fundo_db - 10 * np.log10(3)
@@ -155,26 +130,23 @@ def simular_quadro(veiculos, t, cfg: ConfigArray, rng, fundo_db=60.0, erro_sinc=
         tau = r / C_SOM + e
         X += amp[:, None] * rfft(s)[None, :] * np.exp(-2j * np.pi * f[None, :] * tau[:, None])
     x = irfft(X, n=ntot, axis=1)[:, pad:pad + N_QUADRO]
-    x += db_para_pa(30.0) * rng.standard_normal(x.shape)       # ruido eletrico do MEMS
+    x += db_para_pa(30.0) * rng.standard_normal(x.shape)
     return x
 
 
-# ------------------------------------------------------------------ localizacao
 class Localizador:
-    """Beamforming delay-and-sum calculado a partir das correlacoes cruzadas (GCC)."""
 
     def __init__(self, cfg: ConfigArray):
         self.cfg = cfg
         self.mics = cfg.posicoes()
         M = len(self.mics)
-        self.i, self.j = np.triu_indices(M, 0)               # inclui i == j (autocorrelacao)
+        self.i, self.j = np.triu_indices(M, 0)
         w = cfg.pesos()
         self.coef = w[self.i] * w[self.j] * np.where(self.i == self.j, 1.0, 2.0) / w.sum() ** 2
         f = rfftfreq(NFFT, 1 / FS)
         self.f = f
         self.mask = (f >= BANDA[0]) & (f <= BANDA[1])
         self.L = NFFT * UP
-        # grades fixas
         self.gx = np.arange(-15, 15.01, 0.25)
         self.gy = np.arange(1.0, 11.01, 0.25)
         GX, GY = np.meshgrid(self.gx, self.gy)
@@ -211,25 +183,22 @@ class Localizador:
         return 10 * np.log10(np.maximum(p, 1e-20) / P_REF ** 2)
 
     def potencia_deconvoluida(self, x, pts):
-        """Separa a potencia de cada veiculo (estilo DAMAS): P_feixe = A @ p_fontes, resolvido com NNLS.
-        Remove o 'vazamento' de uma moto barulhenta para o feixe apontado para a vizinha."""
         from scipy.optimize import nnls
         X = rfft(x, n=NFFT, axis=1)[:, self.mask]
         fb = self.f[self.mask]
         Pf = (np.abs(X) ** 2).mean(0)
         wf = Pf / Pf.sum()
         w = self.cfg.pesos()
-        r = np.linalg.norm(np.atleast_2d(pts)[:, None, :] - self.mics[None], axis=2)           # V,M
-        dr = r[:, None, :] - r[None, :, :]                                                   # V,U,M
+        r = np.linalg.norm(np.atleast_2d(pts)[:, None, :] - self.mics[None], axis=2)
+        dr = r[:, None, :] - r[None, :, :]
         resp = (w[None, None, :, None] * np.exp(2j * np.pi * fb * dr[..., None] / C_SOM)).sum(2) / w.sum()
-        A = (np.abs(resp) ** 2 * wf).sum(-1)                                                 # V,U
-        A = np.column_stack([A, np.full(len(A), (w ** 2).sum() / w.sum() ** 2)])           # + ruido difuso
+        A = (np.abs(resp) ** 2 * wf).sum(-1)
+        A = np.column_stack([A, np.full(len(A), (w ** 2).sum() / w.sum() ** 2)])
         b = self._pot(self.correlacoes(x), self._indices(np.atleast_2d(pts)))
         p, _ = nnls(A, b)
-        return np.maximum(p[:-1], P_REF ** 2 * 10 ** 3)                                     # piso de 30 dB
+        return np.maximum(p[:-1], P_REF ** 2 * 10 ** 3)
 
     def espectro_feixe(self, x, pos):
-        """Espectro do sinal 'focado' em pos (delay-and-sum no dominio da frequencia)."""
         X = rfft(x, n=NFFT, axis=1)
         r = np.linalg.norm(self.mics - pos, axis=1)
         w = self.cfg.pesos()
@@ -247,7 +216,6 @@ def get_localizador(cfg: ConfigArray) -> Localizador:
     return _CACHE_LOC[chave]
 
 
-# ------------------------------------------------------------------ analise da cena
 @dataclass
 class Resultado:
     veiculos: list
@@ -255,12 +223,12 @@ class Resultado:
     tempos: np.ndarray
     limite: float
     margem: float
-    perfis: list = field(default_factory=list)       # perfil angular (dB) por quadro
-    picos: list = field(default_factory=list)        # angulos dos picos por quadro
-    mapas: list = field(default_factory=list)        # mapa cartesiano (dB) por quadro
-    L75_est: np.ndarray = None                       # [quadro, veiculo]
-    ang_veic: np.ndarray = None                      # [quadro, veiculo]
-    hf: np.ndarray = None                            # fracao de energia 1,5-3 kHz
+    perfis: list = field(default_factory=list)
+    picos: list = field(default_factory=list)
+    mapas: list = field(default_factory=list)
+    L75_est: np.ndarray = None
+    ang_veic: np.ndarray = None
+    hf: np.ndarray = None
     decisoes: list = field(default_factory=list)
 
 
@@ -302,7 +270,6 @@ def analisar_cena(veiculos, cfg=None, n_quadros=8, dt_q=0.15, limite=80.0, marge
 
 
 def decidir(res: Resultado):
-    """Regras de decisao por veiculo. Principio: na duvida, NAO autua."""
     cfg, lim, mg = res.cfg, res.limite, res.margem
     K, nv = res.L75_est.shape
     out = []
@@ -314,14 +281,14 @@ def decidir(res: Resultado):
             outros = [u for u in range(nv) if u != n]
             sep = {u: abs(res.ang_veic[k, u] - th) for u in outros}
             if any(sep[u] < bw for u in outros):
-                ambiguos += 1                   # outro veiculo dentro do mesmo feixe
+                ambiguos += 1
                 continue
             if any(sep[u] < 2 * bw and res.L75_est[k, u] > res.L75_est[k, n] for u in outros):
-                dominados += 1                  # leitura pode ser "vazamento" de vizinho mais forte
+                dominados += 1
                 continue
             validos.append(k)
             if len(res.picos[k]) and np.min(np.abs(res.picos[k] - th)) < bw / 2:
-                seguidos += 1                   # o pico acustico acompanha o veiculo
+                seguidos += 1
         L_med = float(np.median(res.L75_est[:, n]))
         L_val = float(np.median(res.L75_est[validos, n])) if validos else L_med
         hf = float(np.median(res.hf[:, n]))
@@ -351,7 +318,6 @@ def decidir(res: Resultado):
     return out
 
 
-# ------------------------------------------------------------------ cenarios prontos
 def cenario(nome: str):
     if nome == "Duas motos em faixas diferentes":
         return [Veiculo("Moto A", "SIM0A01", "moto", -9.0, 3.5, 12.5, 94.0, True, 7000),
@@ -376,7 +342,7 @@ CENARIOS = ["Duas motos em faixas diferentes", "Duas motos lado a lado (corredor
 def cenario_aleatorio(rng):
     faixas = [3.5, 7.0]
     ya = rng.choice(faixas)
-    yb = rng.choice(faixas + [ya + 1.0])                       # as vezes no "corredor"
+    yb = rng.choice(faixas + [ya + 1.0])
     xa, xb = rng.uniform(-10, 4, 2)
     va = rng.uniform(8, 16)
     vb = va if abs(yb - ya) == 1.0 else rng.uniform(8, 16)
@@ -387,7 +353,6 @@ def cenario_aleatorio(rng):
 
 
 def avaliar(n_cenas=50, seed=123, cfg=None, limite=80.0, margem=2.0, progresso=None):
-    """Monte Carlo: moto A e sempre a adulterada (verdade), moto B a normal."""
     rng = np.random.default_rng(seed)
     cont = dict(acerto=0, revisao=0, perdido=0, falso_positivo=0)
     for c in range(n_cenas):
@@ -407,15 +372,12 @@ def avaliar(n_cenas=50, seed=123, cfg=None, limite=80.0, margem=2.0, progresso=N
     return cont
 
 
-# ------------------------------------------------------------------ impacto (M4)
 def lnight(L_fundo, n_eventos, L_evento, dur_s, horas=9.0):
-    """Nivel equivalente noturno (22h-7h) somando fundo + eventos de passagem."""
     T = horas * 3600
     E = 10 ** (L_fundo / 10) * T + n_eventos * 10 ** (L_evento / 10) * dur_s
     return 10 * np.log10(E / T)
 
 
-# ------------------------------------------------------------------ evento MQTT
 RADARES = [
     dict(radar_id="CWB-R01", via="Av. Sete de Setembro (Batel)", lat=-25.4400, lon=-49.2780),
     dict(radar_id="CWB-R02", via="Av. Batel", lat=-25.4425, lon=-49.2893),

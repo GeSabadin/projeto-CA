@@ -1,9 +1,16 @@
-"""Painel da fiscalização - Radar de Ruído (Curitiba).   Rodar:  python -m streamlit run app.py"""
 import json
 import time
 from pathlib import Path
 
 import streamlit as st
+
+if __name__ == "__main__":
+    from streamlit import runtime
+    if not runtime.exists():
+        import sys
+        from streamlit.web import cli
+        sys.argv = ["streamlit", "run", __file__]
+        sys.exit(cli.main())
 
 import radar_core as rc
 import visual as vz
@@ -33,7 +40,6 @@ DESCRICAO = {
     "Somente motos normais": "Ninguém acima do limite. O radar não deve gerar nenhum evento.",
 }
 
-# ---------------------------------------------------------------- barra lateral
 with st.sidebar:
     st.markdown("## Escolha a cena")
     nome = st.radio("Cena", rc.CENARIOS, label_visibility="collapsed")
@@ -70,7 +76,6 @@ res = rodar(*params)
 eventos = rc.gerar_eventos(res, radar)
 K = len(res.tempos)
 
-# ---------------------------------------------------------------- cabeçalho
 st.markdown("# Radar de Ruído · Curitiba")
 st.markdown('<div class="sub">Painel de fiscalização · identificação de veículos com escapamento adulterado '
             'por localização acústica (simulação)</div>',
@@ -86,7 +91,6 @@ st.write("")
 
 aba1, aba2, aba3, aba4 = st.tabs(["Demonstração", "Eventos enviados", "Radares na cidade", "Resultados e impacto"])
 
-# ---------------------------------------------------------------- aba 1: demonstração
 with aba1:
     culpados = [d for d in res.decisoes if d["status"] == rc.STATUS_AUTUA]
     duvidas = [d for d in res.decisoes if d["status"] == rc.STATUS_REVISAO]
@@ -153,7 +157,6 @@ with aba1:
                     f"via correlação cruzada (GCC) entre os pares · banda de 300 a 3000 Hz (≈ dB(A)) · "
                     f"{K} quadros de 128 ms · cena 2D simulada.")
 
-# ---------------------------------------------------------------- aba 2: eventos
 with aba2:
     if not eventos:
         st.success("Nenhum evento: nada é enviado à fiscalização quando todos estão dentro do limite.")
@@ -185,14 +188,12 @@ with aba2:
             except Exception as e:
                 st.warning(f"Não consegui conectar ao broker ({e}). Os eventos foram salvos em eventos.jsonl.")
 
-# ---------------------------------------------------------------- aba 3: mapa
 with aba3:
     st.markdown("Vias com muito movimento noturno onde os radares seriam instalados *(posições ilustrativas)*.")
     st.map([{"lat": r["lat"], "lon": r["lon"]} for r in rc.RADARES], zoom=13, color="#d03b3b", size=60)
     for r in rc.RADARES:
         st.markdown(f"**{r['radar_id']}** · {r['via']}")
 
-# ---------------------------------------------------------------- aba 4: resultados
 with aba4:
     st.markdown("### O sistema acerta?")
     st.markdown("Testamos **100 cenas aleatórias** com duas motos (uma adulterada e uma normal, às vezes lado a lado).")

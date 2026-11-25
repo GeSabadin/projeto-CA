@@ -1,8 +1,3 @@
-"""Demonstracao em linha de comando (gera figuras e o JSON de exemplo).
-
-    python demo.py              -> roda os cenarios, salva figuras em saida/
-    python demo.py --avaliar 100
-"""
 import json
 import sys
 from pathlib import Path

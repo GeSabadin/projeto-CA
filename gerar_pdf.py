@@ -16,7 +16,6 @@ sys.path.insert(0, str(PROJ))
 AZUL, VERM, AMAR, VERDE, CINZA, TINTA = "#2a78d6", "#d03b3b", "#fab219", "#0ca30c", "#6b6a64", "#1f1f1e"
 
 
-# ---------------------------------------------------------------- figura 1: arquitetura
 def caixa(ax, x, y, w, h, titulo, texto, cor):
     ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.02,rounding_size=0.08",
                                 fc="white", ec=cor, lw=2))
@@ -45,7 +44,6 @@ for a, b, t in zip(xs[:-1], xs[1:], ["som + imagem", "evento", "tempo real", "re
 ax.set_xlim(-0.1, 10.85); ax.set_ylim(0, 2); ax.axis("off")
 fig.tight_layout(); fig.savefig(OUT / "arquitetura.png", dpi=200); plt.close(fig)
 
-# ---------------------------------------------------------------- figura 2: princípio da direção
 fig, ax = plt.subplots(figsize=(9, 4.0))
 mics = np.linspace(-2, 2, 9)
 fonte = np.array([-3.2, 4.2])
@@ -69,7 +67,6 @@ ax.text(3.0, 3.6, "A diferença de tempo entre\nos microfones revela a\nDIREÇÃ
 ax.set_xlim(-5.2, 6.2); ax.set_ylim(-1.0, 5.0); ax.set_aspect("equal"); ax.axis("off")
 fig.tight_layout(); fig.savefig(OUT / "principio.png", dpi=200); plt.close(fig)
 
-# ---------------------------------------------------------------- figura 3: cena do painel
 import radar_core as rc  # noqa: E402
 import visual as vz  # noqa: E402
 
@@ -78,7 +75,6 @@ res = rc.analisar_cena(rc.cenario(rc.CENARIOS[0]), seed=1)
 res2 = rc.analisar_cena(rc.cenario(rc.CENARIOS[1]), seed=1)
 (OUT / "cena_corredor.png").write_bytes(vz.png(vz.desenhar_cena(res2, 4), dpi=170))
 
-# ---------------------------------------------------------------- PDF
 from reportlab.lib import colors  # noqa: E402
 from reportlab.lib.enums import TA_JUSTIFY  # noqa: E402
 from reportlab.lib.pagesizes import A4  # noqa: E402

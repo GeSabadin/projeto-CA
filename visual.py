@@ -1,4 +1,3 @@
-"""Desenhos do painel: cena da rua com o 'facho' de barulho, gráficos e textos explicativos."""
 import io
 
 import matplotlib
@@ -11,7 +10,6 @@ from matplotlib.patches import FancyBboxPatch, Patch, Rectangle
 
 import radar_core as rc
 
-# cores de status (sempre acompanhadas de texto, nunca só a cor)
 VERDE, AMARELO, VERMELHO = "#0ca30c", "#fab219", "#d03b3b"
 STATUS = {
     rc.STATUS_OK: dict(cor=VERDE, texto="OK", txt_cor="white", emoji="", nome="Dentro do limite"),
@@ -21,7 +19,6 @@ STATUS = {
 FUNDO = "#0e1117"
 TINTA, TINTA2, GRADE = "#ecebe6", "#a3a29b", "#2c2c2a"
 
-# facho: transparente -> laranja -> amarelo claro
 FACHO = LinearSegmentedColormap.from_list(
     "facho", [(1, 0.55, 0.0, 0.0), (1, 0.55, 0.0, 0.45), (1, 0.85, 0.2, 0.75), (1, 1, 0.75, 0.9)])
 
@@ -62,7 +59,6 @@ def nivel_texto(d, limite):
 def desenhar_cena(res: rc.Resultado, k: int, faixa_db=12.0):
     loc = rc.get_localizador(res.cfg)
     fig, ax = plt.subplots(figsize=(12, 5.4), facecolor=FUNDO)
-    # prédios / calçadas / pista
     ax.add_patch(Rectangle((-15, 9.0), 30, 1.6, color="#16181d", zorder=0))
     for x in np.arange(-14.5, 15, 2.4):
         ax.add_patch(Rectangle((x, 9.3), 1.6, 1.0, color="#262930", zorder=0))
@@ -77,7 +73,6 @@ def desenhar_cena(res: rc.Resultado, k: int, faixa_db=12.0):
     ax.text(-14.7, 2.0, "faixa 1  →", fontsize=9, color="#8a8983")
     ax.text(-14.7, 5.5, "faixa 2  →", fontsize=9, color="#8a8983")
 
-    # facho de barulho (mapa de calor acústico)
     if res.mapas:
         m = res.mapas[k].copy()
         norm = np.clip((m - (m.max() - faixa_db)) / faixa_db, 0, 1)
@@ -85,7 +80,6 @@ def desenhar_cena(res: rc.Resultado, k: int, faixa_db=12.0):
         ax.imshow(norm, extent=[loc.gx[0], loc.gx[-1], loc.gy[0], loc.gy[-1]], origin="lower",
                   cmap=FACHO, vmin=0, vmax=1, aspect="auto", zorder=2, interpolation="bilinear")
 
-    # veículos vistos pela câmera
     t = res.tempos[k]
     for n, v in enumerate(res.veiculos):
         d = res.decisoes[n]
@@ -102,7 +96,6 @@ def desenhar_cena(res: rc.Resultado, k: int, faixa_db=12.0):
                 fontsize=9.5, fontweight="bold", color=s["txt_cor"], zorder=6,
                 bbox=dict(boxstyle="round,pad=0.3", fc=s["cor"], ec="none"))
 
-    # radar no poste
     ax.plot(0, 0.75, "o", ms=16, color="#2a78d6", mec="white", mew=2, zorder=7)
     ax.text(0.7, 0.75, "RADAR  (16 microfones + câmera)", va="center", fontsize=9.5,
             color="#6aa8f0", fontweight="bold", zorder=7)

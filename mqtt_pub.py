@@ -1,4 +1,3 @@
-"""Publicacao/assinatura dos eventos do radar via MQTT (paho-mqtt 2.x ou 1.x)."""
 import json
 import sys
 
@@ -10,7 +9,7 @@ TOPICO_PADRAO = "cwb/radar-ruido/{radar_id}/eventos"
 def _cliente(nome):
     try:
         return mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=nome)
-    except AttributeError:          # paho 1.x
+    except AttributeError:
         return mqtt.Client(client_id=nome)
 
 
@@ -30,7 +29,6 @@ def publicar(eventos, host="localhost", porta=1883, topico=TOPICO_PADRAO, timeou
 
 
 if __name__ == "__main__":
-    # Assinante simples (lado da fiscalizacao): python mqtt_pub.py [host]
     host = sys.argv[1] if len(sys.argv) > 1 else "localhost"
     cli = _cliente("painel-fiscalizacao")
 
